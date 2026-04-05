@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Life PRO</title>
+
+<style>
+:root {
+    color-scheme: dark;
+}
+body {
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+canvas {
+    border: 2px dashed #555;
+}
+</style>
+</head>
+
+<body>
+<canvas id="canvas"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/lil-gui@0.17"></script>
+
+<script>
+// ================= SETTINGS =================
+const settings = {
+    atoms: 1200,
+    radius: 2,
+    colors: ["red","cyan","lime","yellow"],
+    interactionRadius: 80,
+    viscosity: 0.85,
+    gravity: 0,
+    trails: true,
+    trailAlpha: 0.15
+};
+
+// ================= CANVAS =================
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+function resize() {
+    canvas.width = window.innerWidth * 0.95;
+    canvas.height = window.innerHeight * 0.95;
+}
+window.addEventListener("resize", resize);
+resize();
+
+// ================= ATOMS =================
+let atoms = [];
+
+function createAtoms() {
+    atoms = [];
+    for (let i = 0; i < settings.atoms; i++) {
+        atoms.push({
+            x: Math.random()*canvas.width,
+            y: Math.random()*canvas.height,
+            vx: 0,
+            vy: 0,
+            type: Math.floor(Math.random()*settings.colors.length)
+        });
+    }
+}
+
+// ================= RULES =================
+let rules = [];
+
+function randomizeRules() {
+    rules = [];
+    for (let i=0;i<settings.colors.length;i++) {
+        rules[i] = [];
+        for (let j=0;j<settings.colors.length;j++) {
+            rules[i][j] = Math.random()*2 - 1;
+        }
+    }
+}
+
+// ================= GRID (OPTIMIZATION) =================
+const cellSize = 80;
+let grid = [];
+
+function buildGrid() {
+    grid = {};
+    for (let a of atoms) {
+        let gx = Math.floor(a.x / cellSize);
+        let gy = Math.floor(a.y / cellSize);
+        let key = gx + "," + gy;
+        if (!grid[key]) grid[key] = [];
+        grid[key].push(a);
+    }
+}
+
+function getNeighbors(a) {
+    let gx = Math.floor(a.x / cellSize);
+    let gy = Math.floor(a.y / cellSize);
+    let neighbors = [];
+
+    for (let x=-1;x<=1;x++) {
+        for (let y=-1;y<=1;y++) {
+            let key = (gx+x)+","+(gy+y);
+            if (grid[key]) neighbors.push(...grid[key]);
+        }
+    }
+    return neighbors;
+}
+
+// ================= PHYSICS =================
+function update() {
+    buildGrid();
+
+    for (let a of atoms) {
+        let fx = 0, fy = 0;
+
+        let neighbors = getNeighbors(a);
+
+        for (let b of neighbors) {
+            if (a === b) continue;
+
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            let dist2 = dx*dx + dy*dy;
+
+            if (dist2 < settings.interactionRadius**2 && dist2 > 0) {
+                let force = rules[a.type][b.type] / Math.sqrt(dist2);
+                fx += force * dx;
+                fy += force * dy;
+            }
+        }
+
+        a.vx = a.vx * settings.viscosity + fx;
+        a.vy = a.vy * settings.viscosity + fy + settings.gravity;
+
+        a.x += a.vx;
+        a.y += a.vy;
+
+        // bounce walls
+        if (a.x < 0 || a.x > canvas.width) a.vx *= -1;
+        if (a.y < 0 || a.y > canvas.height) a.vy *= -1;
+    }
+}
+
+// ================= DRAW =================
+function draw() {
+    if (!settings.trails) {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0,0,canvas.width,canvas.height);
+    } else {
+        ctx.fillStyle = `rgba(0,0,0,${settings.trailAlpha})`;
+        ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+
+    for (let a of atoms) {
+        ctx.fillStyle = settings.colors[a.type];
+        ctx.fillRect(a.x, a.y, settings.radius, settings.radius);
+    }
+}
+
+// ================= LOOP =================
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+// ================= INTERACTION =================
+canvas.addEventListener("click", e => {
+    for (let a of atoms) {
+        let dx = a.x - e.clientX;
+        let dy = a.y - e.clientY;
+        let d = dx*dx + dy*dy;
+        if (d < 10000) {
+            a.vx += dx * 0.01;
+            a.vy += dy * 0.01;
+        }
+    }
+});
+
+// ================= GUI =================
+const gui = new lil.GUI();
+
+gui.add(settings, "atoms", 100, 5000, 100).onFinishChange(()=>{
+    createAtoms();
+});
+
+gui.add(settings, "viscosity", 0.5, 0.99, 0.01);
+gui.add(settings, "gravity", -0.5, 0.5, 0.01);
+gui.add(settings, "interactionRadius", 20, 150, 5);
+gui.add(settings, "trails");
+gui.add(settings, "trailAlpha", 0.01, 0.5, 0.01);
+
+gui.add({
+    randomize: ()=>{
+        randomizeRules();
+    }
+},"randomize");
+
+gui.add({
+    reset: ()=>{
+        createAtoms();
+    }
+},"reset");
+
+// ================= START =================
+randomizeRules();
+createAtoms();
+loop();
+
+</script>
+</body>
+</html>
