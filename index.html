@@ -2,35 +2,66 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Life FULL PRO</title>
+<title>TweakLife</title>
 
 <style>
 :root { color-scheme: dark; }
-body {
-    margin:0;
+body { margin:0; font-family:sans-serif; }
+
+/* ===== MENU ===== */
+#menu {
+    position:absolute;
+    width:100%;
+    height:100%;
+    background:#000;
     display:flex;
-    justify-content:center;
+    flex-direction:column;
     align-items:center;
+    justify-content:center;
+    gap:10px;
 }
+
+button, input {
+    padding:10px;
+    font-size:16px;
+}
+
 #canvas {
+    display:none;
     border:2px dashed #555;
-    outline:none;
 }
 </style>
 </head>
 
 <body>
-<canvas id="canvas" tabindex="1"></canvas>
+
+<div id="menu">
+    <h1>TweakLife</h1>
+
+    <input id="seedInput" placeholder="Seed (optional)">
+    <input id="nameInput" placeholder="World Name">
+
+    <button onclick="createWorld()">🌍 New World</button>
+    <button onclick="showLoad()">📂 Load World</button>
+
+    <div id="loadList"></div>
+</div>
+
+<canvas id="canvas"></canvas>
+
 <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.17"></script>
 
 <script>
+// ================= STATE =================
+let gameState = "menu";
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
 // ================= SETTINGS =================
-const maxRadius = 200;
 const predefinedColors = ['green','red','orange','cyan','magenta','lavender','teal'];
 
-const settings = {
-    seed: 12345,
-    fps: 0,
+let settings = {
+    seed: 0,
     numColors: 4,
     atoms: { count: 500, radius: 2 },
     rules: {},
@@ -38,35 +69,103 @@ const settings = {
     rulesArray: [],
     radii2Array: [],
     colors: [],
-    time_scale: 1,
     viscosity: 0.7,
     gravity: 0,
-    wallRepel: 40,
-    reset: ()=> randomAtoms(settings.atoms.count,true),
-    randomRules: ()=> { settings.seed = local_seed; startRandom(); },
-    symmetricRules: ()=> { symmetricRules(); randomAtoms(settings.atoms.count,true); updateGUI(); },
+    time_scale: 1,
     gui:null
 };
 
-// ================= CANVAS =================
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-
-function resize(){
-    canvas.width = window.innerWidth*0.95;
-    canvas.height = window.innerHeight*0.95;
-}
-window.addEventListener("resize", resize);
-resize();
-
 // ================= RNG =================
-let local_seed = settings.seed;
+let local_seed = 0;
 function rand(){
     let t = local_seed += 0x6D2B79F5;
     t = Math.imul(t ^ t>>>15, t|1);
     t ^= t + Math.imul(t ^ t>>>7, t|61);
     return ((t ^ t>>>14)>>>0)/4294967296;
 }
+
+// ================= MENU =================
+function createWorld(){
+    let seed = document.getElementById("seedInput").value;
+    let name = document.getElementById("nameInput").value || "World";
+
+    settings.seed = seed ? Number(seed) : Math.floor(Math.random()*999999999);
+
+    startWorld();
+
+    saveWorld(name);
+}
+
+function showLoad(){
+    let list = document.getElementById("loadList");
+    list.innerHTML="";
+
+    let saves = JSON.parse(localStorage.getItem("tweaklife_saves")||"[]");
+
+    saves.forEach((s,i)=>{
+        let div = document.createElement("div");
+
+        div.innerHTML = `
+            ${s.name}
+            <button onclick="loadWorld(${i})">Load</button>
+            <button onclick="deleteWorld(${i})">Delete</button>
+        `;
+        list.appendChild(div);
+    });
+}
+
+function saveWorld(name){
+    let saves = JSON.parse(localStorage.getItem("tweaklife_saves")||"[]");
+
+    saves.push({
+        name,
+        data: JSON.stringify(settings)
+    });
+
+    localStorage.setItem("tweaklife_saves", JSON.stringify(saves));
+}
+
+function loadWorld(i){
+    let saves = JSON.parse(localStorage.getItem("tweaklife_saves"));
+    settings = JSON.parse(saves[i].data);
+
+    startWorld(true);
+}
+
+function deleteWorld(i){
+    let saves = JSON.parse(localStorage.getItem("tweaklife_saves"));
+    saves.splice(i,1);
+    localStorage.setItem("tweaklife_saves", JSON.stringify(saves));
+    showLoad();
+}
+
+// ================= START =================
+function startWorld(loaded=false){
+    document.getElementById("menu").style.display="none";
+    canvas.style.display="block";
+
+    resize();
+
+    local_seed = settings.seed;
+
+    if(!loaded){
+        setColors();
+        randomRules();
+    } else {
+        flattenRules();
+    }
+
+    randomAtoms(settings.atoms.count,true);
+    setupGUI();
+    gameState="game";
+}
+
+// ================= CANVAS =================
+function resize(){
+    canvas.width = window.innerWidth*0.95;
+    canvas.height = window.innerHeight*0.95;
+}
+window.addEventListener("resize", resize);
 
 // ================= COLORS =================
 function setColors(){
@@ -78,24 +177,11 @@ function setColors(){
 
 // ================= RULES =================
 function randomRules(){
-    local_seed = settings.seed;
     for(const c1 of settings.colors){
         settings.rules[c1]={};
         settings.radii[c1]=80;
         for(const c2 of settings.colors){
             settings.rules[c1][c2]=rand()*2-1;
-        }
-    }
-    flattenRules();
-}
-
-function symmetricRules(){
-    for(const c1 of settings.colors){
-        for(const c2 of settings.colors){
-            if(c2 < c1){
-                let v = 0.5*(settings.rules[c1][c2]+settings.rules[c2][c1]);
-                settings.rules[c1][c2]=settings.rules[c2][c1]=v;
-            }
         }
     }
     flattenRules();
@@ -114,26 +200,21 @@ function flattenRules(){
 
 // ================= ATOMS =================
 let atoms=[];
-
-function create(n,c){
-    for(let i=0;i<n;i++){
-        atoms.push([
-            Math.random()*canvas.width,
-            Math.random()*canvas.height,
-            0,0,c
-        ]);
-    }
-}
-
 function randomAtoms(n,clear){
     if(clear) atoms=[];
-    for(let i=0;i<settings.colors.length;i++){
-        create(n,i);
+    for(let c=0;c<settings.colors.length;c++){
+        for(let i=0;i<n;i++){
+            atoms.push([
+                Math.random()*canvas.width,
+                Math.random()*canvas.height,
+                0,0,c
+            ]);
+        }
     }
 }
 
-// ================= GRID (FAST) =================
-const cellSize = 80;
+// ================= GRID =================
+const cellSize=80;
 let grid={};
 
 function buildGrid(){
@@ -184,11 +265,8 @@ function applyRules(){
             }
         }
 
-        fy+=settings.gravity;
-
-        let vmix=(1-settings.viscosity);
-        a[2]=a[2]*vmix+fx*settings.time_scale;
-        a[3]=a[3]*vmix+fy*settings.time_scale;
+        a[2]=a[2]*(1-settings.viscosity)+fx*settings.time_scale;
+        a[3]=a[3]*(1-settings.viscosity)+fy*settings.time_scale;
     }
 
     for(const a of atoms){
@@ -213,58 +291,25 @@ function draw(){
 
 // ================= LOOP =================
 function loop(){
-    applyRules();
-    draw();
+    if(gameState==="game"){
+        applyRules();
+        draw();
+    }
     requestAnimationFrame(loop);
 }
+loop();
 
 // ================= GUI =================
-function updateGUI(){
+function setupGUI(){
     if(settings.gui) settings.gui.destroy();
-
     settings.gui = new lil.GUI();
 
-    const config = settings.gui.addFolder("Config");
-    config.add(settings,"reset");
-    config.add(settings,"randomRules");
-    config.add(settings,"symmetricRules");
-    config.add(settings,"numColors",1,7,1).onFinishChange(()=>{
-        setColors(); startRandom();
-    });
-    config.add(settings,"seed").onFinishChange(()=> startRandom());
-    config.add(settings.atoms,"count",100,3000,100).onFinishChange(()=>{
-        randomAtoms(settings.atoms.count,true);
-    });
+    settings.gui.add(settings.atoms,"count",100,3000,100)
+        .onFinishChange(()=> randomAtoms(settings.atoms.count,true));
 
-    const physics = settings.gui.addFolder("Physics");
-    physics.add(settings,"time_scale",0.1,3,0.1);
-    physics.add(settings,"viscosity",0.1,1,0.05);
-    physics.add(settings,"gravity",-0.5,0.5,0.01);
-
-    // RULES UI
-    for(const c1 of settings.colors){
-        const folder = settings.gui.addFolder("Rules: "+c1);
-        for(const c2 of settings.colors){
-            folder.add(settings.rules[c1],c2,-1,1,0.01)
-                .name("→ "+c2)
-                .onFinishChange(()=> flattenRules());
-        }
-        folder.add(settings.radii,c1,10,maxRadius,5)
-            .name("Radius")
-            .onFinishChange(()=> flattenRules());
-    }
+    settings.gui.add(settings,"viscosity",0.1,1,0.05);
+    settings.gui.add(settings,"gravity",-0.5,0.5,0.01);
 }
-
-// ================= START =================
-function startRandom(){
-    setColors();
-    randomRules();
-    randomAtoms(settings.atoms.count,true);
-    updateGUI();
-}
-
-startRandom();
-loop();
 
 </script>
 </body>
